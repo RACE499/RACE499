@@ -1,0 +1,193 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import mariadb
+from mariadb import Error
+from collections import deque
+
+class LoginApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("QUEHUB Login")  # Updated title here
+
+        # Set the window to full screen
+        master.attributes('-fullscreen', True)
+
+        # Create a notebook (tabbed interface)
+        self.notebook = ttk.Notebook(master)
+        self.notebook.pack(fill='both', expand=True)
+
+        # Tab 1: Login
+        self.login_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.login_tab, text='Login')
+
+        # Tab 2: Queueing
+        self.queue_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.queue_tab, text='Queueing')
+        self.notebook.hide(self.queue_tab)  # Hide queue tab initially
+
+        # Login UI
+        self.create_login_ui()
+
+        # Queue data structure
+        self.counter1_queue = deque()
+        self.counter2_queue = deque()
+
+        # Current tickets being served
+        self.current_serving_ticket1 = None
+        self.current_serving_ticket2 = None
+
+        # Database connection
+        self.connection = None
+
+    def create_login_ui(self):
+        # Centering the login form using grid
+        for i in range(7):  # 6 rows + title
+            self.login_tab.grid_rowconfigure(i, weight=1)
+        self.login_tab.grid_columnconfigure(0, weight=1)
+        self.login_tab.grid_columnconfigure(1, weight=1)
+
+        tk.Label(self.login_tab, text="QUEHUB Login", font=("Arial", 48)).grid(row=0, columnspan=2, pady=20)  # Updated title here
+
+        tk.Label(self.login_tab, text="Host/IP:", font=("Arial", 36)).grid(row=1, column=0, padx=20, pady=10, sticky='e')
+        self.host_entry = tk.Entry(self.login_tab, font=("Arial", 36))
+        self.host_entry.grid(row=1, column=1, padx=20, pady=10)
+
+        tk.Label(self.login_tab, text="Database:", font=("Arial", 36)).grid(row=2, column=0, padx=20, pady=10, sticky='e')
+        self.database_entry = tk.Entry(self.login_tab, font=("Arial", 36))
+        self.database_entry.grid(row=2, column=1, padx=20, pady=10)
+
+        tk.Label(self.login_tab, text="Port:", font=("Arial", 36)).grid(row=3, column=0, padx=20, pady=10, sticky='e')
+        self.port_entry = tk.Entry(self.login_tab, font=("Arial", 36))
+        self.port_entry.grid(row=3, column=1, padx=20, pady=10)
+
+        tk.Label(self.login_tab, text="Username:", font=("Arial", 36)).grid(row=4, column=0, padx=20, pady=10, sticky='e')
+        self.username_entry = tk.Entry(self.login_tab, font=("Arial", 36))
+        self.username_entry.grid(row=4, column=1, padx=20, pady=10)
+
+        tk.Label(self.login_tab, text="Password:", font=("Arial", 36)).grid(row=5, column=0, padx=20, pady=10, sticky='e')
+        self.password_entry = tk.Entry(self.login_tab, show='*', font=("Arial", 36))
+        self.password_entry.grid(row=5, column=1, padx=20, pady=10)
+
+        self.remember_var = tk.BooleanVar()
+        self.remember_checkbox = tk.Checkbutton(self.login_tab, text="Remember Password", variable=self.remember_var, font=("Arial", 36))
+        self.remember_checkbox.grid(row=6, columnspan=2, pady=10)
+
+        # Swapped positions of Clear and Connect buttons
+        tk.Button(self.login_tab, text="Clear", command=self.clear_info, font=("Arial", 36)).grid(row=7, column=0, pady=20)
+        tk.Button(self.login_tab, text="Connect", command=self.connect_to_db, font=("Arial", 36)).grid(row=7, column=1, pady=20)
+
+    def connect_to_db(self):
+        try:
+            host = self.host_entry.get()
+            database = self.database_entry.get()
+            port = int(self.port_entry.get())
+            username = self.username_entry.get()
+            password = self.password_entry.get()
+
+            self.connection = mariadb.connect(
+                host=host,
+                port=port,
+                database=database,
+                user=username,
+                password=password
+            )
+
+            messagebox.showinfo("Connection Successful", "Connected to the database!")
+            self.notebook.select(self.queue_tab)  # Switch to the queue tab
+            self.start_queueing()
+            self.auto_refresh()
+            self.auto_serve()  # Start auto-serving customers
+        except Error as e:
+            messagebox.showerror("Connection Error", f"Error: {e}")
+
+    def clear_info(self):
+        self.host_entry.delete(0, tk.END)
+        self.database_entry.delete(0, tk.END)
+        self.port_entry.delete(0, tk.END)
+        self.username_entry.delete(0, tk.END)
+        self.password_entry.delete(0, tk.END)
+        self.remember_var.set(False)
+
+    def start_queueing(self):
+        self.update_queue_display()
+
+    def update_queue_display(self):
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT * FROM enrollment")
+            rows = cursor.fetchall()
+            self.counter1_queue.clear()
+            self.counter2_queue.clear()
+            for row in rows:
+                if row[0] == 1:
+                    self.counter1_queue.append(row[1])
+                elif row[0] == 2:
+                    self.counter2_queue.append(row[1])
+            self.refresh_queue_labels()
+        except Error as e:
+            print(f"Error fetching queue data: {e}")
+
+    def refresh_queue_labels(self):
+        # Clear previous labels
+        for widget in self.queue_tab.winfo_children():
+            widget.destroy()
+
+        # Center frame for all elements
+        center_frame = tk.Frame(self.queue_tab)
+        center_frame.pack(expand=True)  # Center the frame vertically and horizontally
+
+        # NOW SERVING Label
+        tk.Label(center_frame, text="NOW SERVING", font=("Arial", 72)).pack(pady=20)
+
+        # Frame for counters
+        counter_frame = tk.Frame(center_frame)
+        counter_frame.pack()
+
+        # Counter 1 Box (6x6 inches)
+        counter1_box = tk.LabelFrame(counter_frame, text="COUNTER 1", font=("Arial", 48), width=576, height=576)
+        counter1_box.pack(side='left', padx=20, pady=20)  # Pack side by side with padding
+        self.ticket_label1 = tk.Label(counter1_box, text="NONE", font=("Arial", 72))
+        self.ticket_label1.pack(pady=50)  # Increased padding for larger appearance
+
+        # Counter 2 Box (6x6 inches)
+        counter2_box = tk.LabelFrame(counter_frame, text="COUNTER 2", font=("Arial", 48), width=576, height=576)
+        counter2_box.pack(side='right', padx=20, pady=20)  # Pack side by side with padding
+        self.ticket_label2 = tk.Label(counter2_box, text="NONE", font=("Arial", 72))
+        self.ticket_label2.pack(pady=50)  # Increased padding for larger appearance
+
+    def auto_refresh(self):
+        self.update_queue_display()
+        self.master.after(30000, self.auto_refresh)  # Refresh every 30 seconds
+
+    def auto_serve(self):
+        if self.counter1_queue or self.counter2_queue:
+            if self.counter1_queue:
+                self.current_serving_ticket1 = self.counter1_queue.popleft()
+                print(f"Counter 1 served ticket: {self.current_serving_ticket1}")
+                self.update_ticket_in_db(1, self.current_serving_ticket1)  # Update the database after serving
+
+            if self.counter2_queue:
+                self.current_serving_ticket2 = self.counter2_queue.popleft()
+                print(f"Counter 2 served ticket: {self.current_serving_ticket2}")
+                self.update_ticket_in_db(2, self.current_serving_ticket2)  # Update the database after serving
+
+        # Update the display for now serving
+        self.ticket_label1.config(text=str(self.current_serving_ticket1) if self.current_serving_ticket1 else "NONE")
+        self.ticket_label2.config(text=str(self.current_serving_ticket2) if self.current_serving_ticket2 else "NONE")
+
+        self.master.after(30000, self.auto_serve)  # Serve every 30 seconds
+
+    def update_ticket_in_db(self, counter_number, ticket_number):
+        # Update the ticket count in the database for the specified counter
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("UPDATE enrollment SET Tickets = Tickets + 1 WHERE Counters = ?", (counter_number,))
+            self.connection.commit()
+            print(f"Updated database for Counter {counter_number} with served Ticket: {ticket_number}.")
+        except Error as e:
+            print(f"Error updating Ticket in database: {e}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LoginApp(root)
+    root.mainloop()
